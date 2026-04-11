@@ -5,6 +5,10 @@ build/
 !**/src/test/**/build/
 .kotlin
 
+.idea
+gradle
+
+
 ### IntelliJ IDEA ###
 .idea/modules.xml
 .idea/jarRepositories.xml
