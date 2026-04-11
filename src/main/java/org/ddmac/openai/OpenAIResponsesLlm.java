@@ -2,10 +2,7 @@ package org.ddmac.openai;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.adk.models.BaseLlm;
-import com.google.adk.models.BaseLlmConnection;
-import com.google.adk.models.LlmRequest;
-import com.google.adk.models.LlmResponse;
+import com.google.adk.models.*;
 import com.google.genai.types.Part;
 import io.reactivex.rxjava3.core.BackpressureStrategy;
 import io.reactivex.rxjava3.core.Flowable;
@@ -27,6 +24,15 @@ import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
 
+/**
+ * A reactive Large Language Model (LLM) adapter that integrates the OpenAI Responses API
+ * with the Google Agent Development Kit (ADK).
+ * <p>
+ * This class extends {@link BaseLlm} to provide support for both synchronous and
+ * asynchronous Server-Sent Events (SSE) streaming generation. It maps ADK {@link LlmRequest}
+ * objects to OpenAI-compatible payloads and converts the resulting HTTP responses back into
+ * a reactive {@link Flowable} stream of {@link LlmResponse} objects.
+ */
 public class OpenAIResponsesLlm extends BaseLlm {
 
     private static final Logger logger = LoggerFactory.getLogger(OpenAIResponsesLlm.class);
@@ -35,6 +41,13 @@ public class OpenAIResponsesLlm extends BaseLlm {
     private final ObjectMapper mapper;
     private final URI aiURI;
 
+    /**
+     * Constructs a new OpenAIResponsesLlm adapter.
+     *
+     * @param model   The specific model identifier to be used (e.g., "gpt-4o").
+     * @param baseUrl The base URL of the OpenAI-compatible server. The path "/v1/responses"
+     * will be automatically appended to this URL.
+     */
     public OpenAIResponsesLlm(String model, String baseUrl) {
         super(model);
         this.httpClient = HttpClient.newHttpClient();
@@ -42,6 +55,14 @@ public class OpenAIResponsesLlm extends BaseLlm {
         this.aiURI = URI.create(baseUrl + "/v1/responses");
     }
 
+    /**
+     * Generates content using the underlying OpenAI-compatible model.
+     *
+     * @param llmRequest The standardized request from the ADK containing prompts, context, and configurations.
+     * @param stream     If {@code true}, establishes an asynchronous SSE connection and emits partial chunks.
+     * If {@code false}, blocks and emits a single complete response.
+     * @return A {@link Flowable} stream of {@link LlmResponse} objects.
+     */
     @Override
     public Flowable<LlmResponse> generateContent(LlmRequest llmRequest, boolean stream) {
         if(stream){
@@ -51,6 +72,12 @@ public class OpenAIResponsesLlm extends BaseLlm {
         }
     }
 
+    /**
+     * Handles asynchronous, Server-Sent Events (SSE) streaming generation.
+     *
+     * @param llmRequest The ADK request to process.
+     * @return A reactive stream emitting partial {@link LlmResponse} chunks as they arrive.
+     */
     private Flowable<LlmResponse> streamResponse(LlmRequest llmRequest){
         return Flowable.create(emitter -> {
                 String reqBody = mapToOpenAIRequest(llmRequest,true).toJson();
@@ -133,6 +160,12 @@ public class OpenAIResponsesLlm extends BaseLlm {
         );
     }
 
+    /**
+     * Handles synchronous, single-turn content generation.
+     *
+     * @param llmRequest The ADK request to process.
+     * @return A reactive stream emitting exactly one complete {@link LlmResponse}.
+     */
     private Flowable<LlmResponse> singleResponse(LlmRequest llmRequest){
         return Flowable.fromCallable(() -> {
             try{
@@ -153,6 +186,14 @@ public class OpenAIResponsesLlm extends BaseLlm {
         });
     }
 
+    /**
+     * Maps the ADK's standardized LlmRequest into the specific JSON shape required
+     * by the OpenAI Responses API.
+     *
+     * @param llmRequest The incoming ADK request.
+     * @param stream     Whether the payload should request a streaming response.
+     * @return A constructed {@link OpenAIResponsesAPIRequest} ready for serialization.
+     */
     private OpenAIResponsesAPIRequest<?> mapToOpenAIRequest(LlmRequest llmRequest, boolean stream){
         OpenAIResponsesAPIRequest.Builder<?> builder = OpenAIResponsesAPIRequest.builder()
                 .model(model())
@@ -188,12 +229,26 @@ public class OpenAIResponsesLlm extends BaseLlm {
         return builder.build();
     }
 
+    /**
+     * Deserializes an SSE JSON chunk and converts it into a partial ADK response.
+     *
+     * @param json The JSON string received in the "data:" line of the SSE stream.
+     * @return A partial {@link LlmResponse}.
+     * @throws JsonProcessingException If the JSON cannot be parsed.
+     */
     private LlmResponse parseStreamingResponse(String json) throws JsonProcessingException {
         OpenAIResponsesAPIStreamingResponse res = mapper.readValue(json, OpenAIResponsesAPIStreamingResponse.class);
         String text = res.delta() != null ? res.delta() : (res.text() != null ? res.text() : "");
         return buildLlmResponse(text,true);
     }
 
+    /**
+     * Deserializes a complete API JSON response and converts it into a final ADK response.
+     *
+     * @param json The raw JSON string returned by the non-streaming endpoint.
+     * @return A complete, non-partial {@link LlmResponse}.
+     * @throws JsonProcessingException If the JSON cannot be parsed.
+     */
     private LlmResponse parseSingleResponse(String json) throws JsonProcessingException {
         OpenAIResponsesAPISingleResponse res = mapper.readValue(json, OpenAIResponsesAPISingleResponse.class);
         StringBuilder sb = new StringBuilder();
@@ -205,6 +260,14 @@ public class OpenAIResponsesLlm extends BaseLlm {
         return buildLlmResponse(sb.toString(),false);
     }
 
+    /**
+     * Constructs the final ADK {@link LlmResponse} object, setting the appropriate
+     * stream management flags.
+     *
+     * @param text      The text generated by the model.
+     * @param isPartial {@code true} if this is an incomplete chunk from a stream; {@code false} otherwise.
+     * @return The configured {@link LlmResponse}.
+     */
     private LlmResponse buildLlmResponse(String text, boolean isPartial){
         Part part = Part.builder().text(text).build();
         com.google.genai.types.Content content = com.google.genai.types.Content.builder()
@@ -218,6 +281,12 @@ public class OpenAIResponsesLlm extends BaseLlm {
                 .build();
     }
 
+    /**
+     * Extracts token usage statistics from the final completion event of a stream
+     * and logs them for telemetry purposes.
+     *
+     * @param json The JSON payload of the "response.completed" event.
+     */
     private void captureUsage(String json){
         try {
             OpenAIResponsesAPIStreamingResponse res = mapper.readValue(json, OpenAIResponsesAPIStreamingResponse.class);
