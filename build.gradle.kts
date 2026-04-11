@@ -35,6 +35,26 @@ publishing {
     publications {
         create<MavenPublication>("maven") {
             from(components["java"])
+
+            pom {
+                name.set("adk-openai-responses")
+                description.set("A reactive adapter integrating the OpenAI Responses API with the Google Agent Development Kit (ADK) 1.0 for Java.")
+                url.set("https://github.com/dcap0/adk-openai-responses") // Update with your actual URL
+
+                licenses {
+                    license {
+                        name.set("The Apache License, Version 2.0")
+                        url.set("http://www.apache.org/licenses/LICENSE-2.0.txt")
+                    }
+                }
+
+                developers {
+                    developer {
+                        id.set("dcap0")
+                        name.set("Dennis Capone")
+                    }
+                }
+            }
         }
     }
 }
