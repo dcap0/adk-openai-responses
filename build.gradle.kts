@@ -27,7 +27,7 @@ dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.21.2")
 
 
-    testRuntimeOnly("com.google.adk:google-adk:1.0.0")
+    testImplementation("com.google.adk:google-adk:1.0.0")
     // JUnit 5 Dependencies
     testImplementation("org.junit.jupiter:junit-jupiter-api:5.10.2")
     testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.10.2")
@@ -40,6 +40,9 @@ dependencies {
     testImplementation("org.assertj:assertj-core:3.25.3")
     testImplementation("org.mockito:mockito-core:5.11.0")
     testImplementation("org.mockito:mockito-junit-jupiter:5.11.0")
+
+    testImplementation("org.wiremock:wiremock:3.5.4")
+
 }
 
 publishing {

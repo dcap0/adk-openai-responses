@@ -1,0 +1,62 @@
+{
+  "id": "resp_76617",
+  "object": "response",
+  "created_at": 1775679504,
+  "completed_at": 1775679504,
+  "status": "completed",
+  "incomplete_details": null,
+  "model": "gemma3:1b-it-qat",
+  "previous_response_id": null,
+  "instructions": null,
+  "output": [
+    {
+      "id": "msg_164843",
+      "type": "message",
+      "status": "completed",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "Hello, World!",
+          "annotations": [],
+          "logprobs": []
+        }
+      ]
+    }
+  ],
+  "error": null,
+  "tools": [],
+  "tool_choice": "auto",
+  "truncation": "disabled",
+  "parallel_tool_calls": true,
+  "text": {
+    "format": {
+      "type": "text"
+    }
+  },
+  "top_p": 1,
+  "presence_penalty": 0,
+  "frequency_penalty": 0,
+  "top_logprobs": 0,
+  "temperature": 1,
+  "reasoning": null,
+  "usage": {
+    "input_tokens": 20,
+    "output_tokens": 327,
+    "total_tokens": 347,
+    "input_tokens_details": {
+      "cached_tokens": 0
+    },
+    "output_tokens_details": {
+      "reasoning_tokens": 0
+    }
+  },
+  "max_output_tokens": null,
+  "max_tool_calls": null,
+  "store": false,
+  "background": false,
+  "service_tier": "default",
+  "metadata": {},
+  "safety_identifier": null,
+  "prompt_cache_key": null
+}

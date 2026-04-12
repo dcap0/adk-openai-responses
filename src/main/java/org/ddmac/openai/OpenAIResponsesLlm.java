@@ -189,6 +189,7 @@ public class OpenAIResponsesLlm extends BaseLlm {
                                                 LlmResponse
                                                         .builder()
                                                         .turnComplete(true)
+                                                        .partial(false)
                                                         .build()
                                         );
                                         emitter.onComplete();

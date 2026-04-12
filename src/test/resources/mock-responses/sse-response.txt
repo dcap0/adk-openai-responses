@@ -1,0 +1,11 @@
+event: response.output_text.delta
+data: {"delta": "Hello"}
+
+event: response.output_text.delta
+data: {"delta": ", "}
+
+event: response.output_text.delta
+data: {"delta": "World!"}
+
+event: response.completed
+data: {"response": {"usage": {"inputTokens": 5, "outputTokens": 3, "totalTokens": 8}}}
