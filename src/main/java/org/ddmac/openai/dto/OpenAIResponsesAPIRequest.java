@@ -72,6 +72,8 @@ public record OpenAIResponsesAPIRequest<T>(
         private String instructions;
         private boolean stream;
 
+        private Builder(){}
+
         /**
          * Sets the target model.
          *
