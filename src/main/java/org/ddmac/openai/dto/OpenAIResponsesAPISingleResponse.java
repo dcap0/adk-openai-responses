@@ -42,7 +42,12 @@ public record OpenAIResponsesAPISingleResponse(
     public record Output(
             @JsonProperty("content") List<Content> content,
             @JsonProperty("role") String role,
-            @JsonProperty("type") String type
+            @JsonProperty("type") String type,
+
+            //function call fields
+            @JsonProperty("name") String name,
+            @JsonProperty("arguments") String arguments,
+            @JsonProperty("call_id") String callId
     ) {
     }
 
