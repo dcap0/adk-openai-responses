@@ -1,16 +1,17 @@
 package org.ddmac.openai;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.adk.models.*;
+import com.google.genai.types.FunctionCall;
 import com.google.genai.types.Part;
 import io.reactivex.rxjava3.core.BackpressureStrategy;
 import io.reactivex.rxjava3.core.Flowable;
-import org.ddmac.openai.dto.Content;
-import org.ddmac.openai.dto.OpenAIResponsesAPIRequest;
+import org.ddmac.openai.dto.*;
 import org.ddmac.openai.dto.OpenAIResponsesAPIRequest.Input;
-import org.ddmac.openai.dto.OpenAIResponsesAPISingleResponse;
-import org.ddmac.openai.dto.OpenAIResponsesAPIStreamingResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -21,8 +22,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
  * A reactive Large Language Model (LLM) adapter that integrates the OpenAI Responses API
@@ -50,8 +50,8 @@ public class OpenAIResponsesLlm extends BaseLlm {
      * @param model   The specific model identifier (e.g., "llama3").
      * @param baseUrl The base URL of the local server (e.g., "http://localhost:11434").
      */
-    public OpenAIResponsesLlm(String model, String baseUrl){
-        this(model,baseUrl,null,false);
+    public OpenAIResponsesLlm(String model, String baseUrl) {
+        this(model, baseUrl, null, false);
     }
 
     /**
@@ -63,8 +63,8 @@ public class OpenAIResponsesLlm extends BaseLlm {
      * @param model The specific model identifier (e.g., "gpt-4o").
      * @throws IllegalArgumentException If the {@code OPENAI_API_KEY} environment variable is missing.
      */
-    public OpenAIResponsesLlm(String model){
-        this(model,"https://api.openai.com",null,true);
+    public OpenAIResponsesLlm(String model) {
+        this(model, "https://api.openai.com", null, true);
     }
 
     /**
@@ -79,23 +79,23 @@ public class OpenAIResponsesLlm extends BaseLlm {
      * @throws IllegalArgumentException If auth is required but no key is provided or found in the environment.
      */
     public OpenAIResponsesLlm(String model, String baseUrl, String apiKey) {
-        this(model,baseUrl,apiKey,true);
+        this(model, baseUrl, apiKey, true);
     }
 
     /**
      * Private master constructor to handle resolution, validation, and assignment.
      */
-    private OpenAIResponsesLlm(String model, String baseUrl, String providedKey, boolean requireAuth){
+    private OpenAIResponsesLlm(String model, String baseUrl, String providedKey, boolean requireAuth) {
         super(model);
 
         String key = providedKey;
 
-        if(requireAuth){
-            if(key == null || key.isBlank()){
+        if (requireAuth) {
+            if (key == null || key.isBlank()) {
                 key = System.getenv("OPENAI_API_KEY");
             }
 
-            if(key == null || key.isBlank()){
+            if (key == null || key.isBlank()) {
                 throw new IllegalArgumentException((
                         "Missing API Key. Set OPENAI_API_KEY, pass it directly, or use the 2-parameter constructor for unauthenticated local models."
                 ));
@@ -113,12 +113,12 @@ public class OpenAIResponsesLlm extends BaseLlm {
      *
      * @param llmRequest The standardized request from the ADK containing prompts, context, and configurations.
      * @param stream     If {@code true}, establishes an asynchronous SSE connection and emits partial chunks.
-     * If {@code false}, blocks and emits a single complete response.
+     *                   If {@code false}, blocks and emits a single complete response.
      * @return A {@link Flowable} stream of {@link LlmResponse} objects.
      */
     @Override
     public Flowable<LlmResponse> generateContent(LlmRequest llmRequest, boolean stream) {
-        if(stream){
+        if (stream) {
             return streamResponse(llmRequest);
         } else {
             return singleResponse(llmRequest);
@@ -131,88 +131,88 @@ public class OpenAIResponsesLlm extends BaseLlm {
      * @param llmRequest The ADK request to process.
      * @return A reactive stream emitting partial {@link LlmResponse} chunks as they arrive.
      */
-    private Flowable<LlmResponse> streamResponse(LlmRequest llmRequest){
+    private Flowable<LlmResponse> streamResponse(LlmRequest llmRequest) {
         return Flowable.create(emitter -> {
-                String reqBody = mapToOpenAIRequest(llmRequest,true).toJson();
+                    String reqBody = mapToOpenAIRequest(llmRequest, true).toJson();
 
-                HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
-                        .uri(aiURI)
-                        .header("Content-Type", "application/json")
-                        .POST(HttpRequest.BodyPublishers.ofString(reqBody));
+                    HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
+                            .uri(aiURI)
+                            .header("Content-Type", "application/json")
+                            .POST(HttpRequest.BodyPublishers.ofString(reqBody));
 
-                if(apiKey != null && !apiKey.isBlank()){
-                    httpRequestBuilder.header("Authorization","Bearer " + apiKey);
-                }
-
-                httpClient.sendAsync(
-                        httpRequestBuilder.build(),
-                        HttpResponse.BodyHandlers.ofInputStream()
-                ).whenComplete((res,throwable) -> {
-                    if(throwable != null){
-                        emitter.onError(throwable);
-                        return;
+                    if (apiKey != null && !apiKey.isBlank()) {
+                        httpRequestBuilder.header("Authorization", "Bearer " + apiKey);
                     }
 
-                    if(res.statusCode() != 200){
-                        emitter.onError(new RuntimeException("OpenAI API Error " + res.statusCode()));
-                        return;
-                    }
+                    httpClient.sendAsync(
+                            httpRequestBuilder.build(),
+                            HttpResponse.BodyHandlers.ofInputStream()
+                    ).whenComplete((res, throwable) -> {
+                        if (throwable != null) {
+                            emitter.onError(throwable);
+                            return;
+                        }
 
-                    try(BufferedReader br = new BufferedReader(new InputStreamReader(res.body()))){
-                        String line;
-                        String currentEvent = "";
+                        if (res.statusCode() != 200) {
+                            emitter.onError(new RuntimeException("OpenAI API Error " + res.statusCode()));
+                            return;
+                        }
 
-                        while((line = br.readLine()) != null){
-                            if(line.isEmpty()) continue;
-                            if(!line.startsWith("event: ") && !line.startsWith("data: ")){
-                                throw new RuntimeException("Error processing line: "+line);
-                            }
-                            if(line.startsWith("event: ")){
-                                currentEvent = line.substring(7).trim();
-                            }
-                            if(line.startsWith("data: ")){
-                                String jsonData = line.substring(6).trim();
+                        try (BufferedReader br = new BufferedReader(new InputStreamReader(res.body()))) {
+                            String line;
+                            String currentEvent = "";
 
-                                switch (currentEvent){
-                                    case "response.output_text.delta":
-                                        try {
-                                            LlmResponse chunk = parseStreamingResponse(jsonData);
-                                            emitter.onNext(chunk);
-                                        } catch (JsonProcessingException e){
-                                            emitter.onError(e);
+                            while ((line = br.readLine()) != null) {
+                                if (line.isEmpty()) continue;
+                                if (!line.startsWith("event: ") && !line.startsWith("data: ")) {
+                                    throw new RuntimeException("Error processing line: " + line);
+                                }
+                                if (line.startsWith("event: ")) {
+                                    currentEvent = line.substring(7).trim();
+                                }
+                                if (line.startsWith("data: ")) {
+                                    String jsonData = line.substring(6).trim();
+
+                                    switch (currentEvent) {
+                                        case "response.output_text.delta":
+                                            try {
+                                                LlmResponse chunk = parseStreamingResponse(jsonData);
+                                                emitter.onNext(chunk);
+                                            } catch (JsonProcessingException e) {
+                                                emitter.onError(e);
+                                                return;
+                                            }
+                                            break;
+                                        case "response.completed":
+                                            captureUsage(jsonData);
+                                            emitter.onNext(
+                                                    LlmResponse
+                                                            .builder()
+                                                            .turnComplete(true)
+                                                            .partial(false)
+                                                            .build()
+                                            );
+                                            emitter.onComplete();
                                             return;
-                                        }
-                                        break;
-                                    case "response.completed":
-                                        captureUsage(jsonData);
-                                        emitter.onNext(
-                                                LlmResponse
-                                                        .builder()
-                                                        .turnComplete(true)
-                                                        .partial(false)
-                                                        .build()
-                                        );
-                                        emitter.onComplete();
-                                        return;
-                                    case "response.output_text.done":
-                                        //check stuff
-                                        break;
-                                    case "error":
-                                        emitter.onError(new RuntimeException("API response parsing failed: "+jsonData));
-                                        return;
-                                    default:
-                                        break;
+                                        case "response.output_text.done":
+                                            //check stuff
+                                            break;
+                                        case "error":
+                                            emitter.onError(new RuntimeException("API response parsing failed: " + jsonData));
+                                            return;
+                                        default:
+                                            break;
+                                    }
                                 }
                             }
+                        } catch (IOException e) {
+                            emitter.onError(e);
+                            return;
                         }
-                    } catch (IOException e) {
-                        emitter.onError(e);
-                        return;
-                    }
-                    emitter.onComplete();
-                });
+                        emitter.onComplete();
+                    });
 
-        },
+                },
                 BackpressureStrategy.BUFFER
         );
     }
@@ -223,18 +223,18 @@ public class OpenAIResponsesLlm extends BaseLlm {
      * @param llmRequest The ADK request to process.
      * @return A reactive stream emitting exactly one complete {@link LlmResponse}.
      */
-    private Flowable<LlmResponse> singleResponse(LlmRequest llmRequest){
+    private Flowable<LlmResponse> singleResponse(LlmRequest llmRequest) {
         return Flowable.fromCallable(() -> {
-            try{
-                String reqBody = mapToOpenAIRequest(llmRequest,false).toJson();
-
+            try {
+                String reqBody = mapToOpenAIRequest(llmRequest, false).toJson();
+                logger.info("Outbound: " + reqBody);
                 HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
                         .uri(aiURI)
                         .header("Content-Type", "application/json")
                         .POST(HttpRequest.BodyPublishers.ofString(reqBody));
 
-                if(apiKey != null && !apiKey.isBlank()){
-                    httpRequestBuilder.header("Authorization","Bearer " + apiKey);
+                if (apiKey != null && !apiKey.isBlank()) {
+                    httpRequestBuilder.header("Authorization", "Bearer " + apiKey);
                 }
 
                 HttpResponse<String> res = httpClient.send(
@@ -257,13 +257,13 @@ public class OpenAIResponsesLlm extends BaseLlm {
      * @param stream     Whether the payload should request a streaming response.
      * @return A constructed {@link OpenAIResponsesAPIRequest} ready for serialization.
      */
-    private OpenAIResponsesAPIRequest<?> mapToOpenAIRequest(LlmRequest llmRequest, boolean stream){
+    private OpenAIResponsesAPIRequest<?> mapToOpenAIRequest(LlmRequest llmRequest, boolean stream) {
         OpenAIResponsesAPIRequest.Builder<?> builder = OpenAIResponsesAPIRequest.builder()
                 .model(model())
                 .stream(stream);
 
-        if(stream) {
-            String instructions = String.join("\n",llmRequest.getSystemInstructions());
+        if (stream) {
+            String instructions = String.join("\n", llmRequest.getSystemInstructions());
 
             builder = builder.instructions(instructions);
 
@@ -279,15 +279,82 @@ public class OpenAIResponsesLlm extends BaseLlm {
                                 .stream().map(part -> new Content("input_text", part.text().orElse("")))
                                 .toList();
 
+
                         return new Input(role, contentList);
                     })
                     .toList();
 
             builder = builder.input(inputs);
         } else {
-            String input = String.join(" ",llmRequest.contents().stream().map(com.google.genai.types.Content::text).toList());
-            builder = builder.input(input);
+            List<Input> inputs = llmRequest.contents().stream()
+                    .map(content -> {
+                        String role = content.role().orElse("user").toLowerCase();
+
+                        if(role.equals("model")){
+                            role = "assistant";
+                        }
+                        else if (role.equals("tool") || role.equals("function")){
+                            role = "user";
+                        }
+
+                        List<Content> contentList = new ArrayList<>();
+                        if (content.parts().isPresent()){
+                            for (Part part: content.parts().get()){
+                                if(part.text().isPresent()) {
+                                    contentList.add(new Content("input_text", part.text().get()));
+                                }
+                                else if (part.functionResponse().isPresent()){
+                                    try{
+                                        Object responseData = part.functionResponse().get().response().orElseThrow();
+                                        String resultJson = mapper.writeValueAsString(responseData);
+                                        contentList.add(new Content("input_text","System Tool Output[" + part.functionResponse().get().name().orElseThrow() + "]: " + resultJson));
+                                    } catch (Exception e) {
+                                        contentList.add(new Content("input_text","Tool executed."));
+                                    }
+                                }
+                                else if (part.functionCall().isPresent()) {
+                                    contentList.add(new Content("input_text", "Action taken: Executed tool '" + part.functionCall().get().name().orElse("unknown") + "'"));
+                                }
+                            }
+                        }
+                        return new Input(role,contentList);
+                    })
+                    .filter(input -> !input.content().isEmpty())
+                    .toList();
+            builder = builder.input(inputs);
         }
+
+        if (llmRequest.tools() != null && !llmRequest.tools().isEmpty()) {
+            List<Tool> openAiTools = llmRequest.tools().values().stream()
+                    .filter(t -> t.declaration() != null && t.declaration().isPresent())
+                    .map(t -> {
+                        try {
+                            String rawJson = t.declaration().orElseThrow().toJson();
+                            logger.debug("Tool found: {}", rawJson);
+                            JsonNode root = mapper.readTree(rawJson);
+
+                            lowercaseTypeFields(root);
+
+                            Tool mappedTool = mapper.treeToValue(root, Tool.class);
+
+                            return new Tool(
+                                    "function",
+                                    mappedTool.name(),
+                                    mappedTool.description(),
+                                    mappedTool.parameters(),
+                                    null
+                            );
+                        } catch (Exception e) {
+                            logger.error("Failed to map ADK tool to OpenAI format", e);
+                            return null;
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .toList();
+
+            builder.tools(openAiTools);
+        }
+
 
         return builder.build();
     }
@@ -302,7 +369,7 @@ public class OpenAIResponsesLlm extends BaseLlm {
     private LlmResponse parseStreamingResponse(String json) throws JsonProcessingException {
         OpenAIResponsesAPIStreamingResponse res = mapper.readValue(json, OpenAIResponsesAPIStreamingResponse.class);
         String text = res.delta() != null ? res.delta() : (res.text() != null ? res.text() : "");
-        return buildLlmResponse(text,true);
+        return buildLlmResponse(text, true);
     }
 
     /**
@@ -314,13 +381,51 @@ public class OpenAIResponsesLlm extends BaseLlm {
      */
     private LlmResponse parseSingleResponse(String json) throws JsonProcessingException {
         OpenAIResponsesAPISingleResponse res = mapper.readValue(json, OpenAIResponsesAPISingleResponse.class);
-        StringBuilder sb = new StringBuilder();
 
-        res.output().stream()
-                .flatMap(out -> out.content().stream())
-                .forEach(content -> sb.append(content.text()));
+        for(OpenAIResponsesAPISingleResponse.Output out: res.output()){
+            if(out.type().equals("function_call")){
+                Map<String,Object> argsMap = new HashMap<>();
+                try{
+                    if(out.arguments() != null && !out.arguments().isBlank()) {
+                        argsMap = mapper.readValue(out.arguments(),
+                                new TypeReference<>() { });
 
-        return buildLlmResponse(sb.toString(),false);
+                    }
+                } catch (Exception e) {
+                    logger.error("Failed to parse tool args for tool: {}", out.name(), e);
+                }
+
+                Part toolPart = Part.builder()
+                        .functionCall(
+                            FunctionCall.builder()
+                                .id(out.callId())
+                                .name(out.name())
+                                .args(argsMap)
+                                .build()
+                        ).build();
+
+                return LlmResponse.builder()
+                        .content(
+                                com.google.genai.types.Content.builder()
+                                        .role("model")
+                                        .parts(List.of(toolPart))
+                                        .build()
+                        )
+                        .turnComplete(false)
+                        .build();
+            }
+
+            if(out.type().equals("message") && out.content() != null){
+                StringBuilder sb = new StringBuilder();
+
+                out.content().stream()
+                        .filter(c -> c.text() != null)
+                        .forEach(c -> sb.append(c.text()));
+
+                return buildLlmResponse(sb.toString(), false);
+            }
+        }
+        return buildLlmResponse("",false);
     }
 
     /**
@@ -331,7 +436,7 @@ public class OpenAIResponsesLlm extends BaseLlm {
      * @param isPartial {@code true} if this is an incomplete chunk from a stream; {@code false} otherwise.
      * @return The configured {@link LlmResponse}.
      */
-    private LlmResponse buildLlmResponse(String text, boolean isPartial){
+    private LlmResponse buildLlmResponse(String text, boolean isPartial) {
         Part part = Part.builder().text(text).build();
         com.google.genai.types.Content content = com.google.genai.types.Content.builder()
                 .role("assistant")
@@ -350,11 +455,11 @@ public class OpenAIResponsesLlm extends BaseLlm {
      *
      * @param json The JSON payload of the "response.completed" event.
      */
-    private void captureUsage(String json){
+    private void captureUsage(String json) {
         try {
             OpenAIResponsesAPIStreamingResponse res = mapper.readValue(json, OpenAIResponsesAPIStreamingResponse.class);
             StringBuilder sb = new StringBuilder();
-            if(res.response() != null && res.response().usage() != null){
+            if (res.response() != null && res.response().usage() != null) {
                 sb.append("Token Usage\n")
                         .append(String.format("\tInput Tokens: %d\n", res.response().usage().inputTokens()))
                         .append(String.format("\tOutput Tokens: %d\n", res.response().usage().outputTokens()))
@@ -363,6 +468,23 @@ public class OpenAIResponsesLlm extends BaseLlm {
             }
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    /**
+     * Puts all values to lowercase for OpenAI schema validation.
+     *
+     * @param node a Jackson JsonNode
+     */
+    private void lowercaseTypeFields(JsonNode node) {
+        if (node.isObject()) {
+            ObjectNode obj = (ObjectNode) node;
+            if (obj.has("type") && obj.get("type").isTextual()) {
+                obj.put("type", obj.get("type").asText().toLowerCase());
+            }
+            obj.elements().forEachRemaining(this::lowercaseTypeFields);
+        } else if (node.isArray()) {
+            node.elements().forEachRemaining(this::lowercaseTypeFields);
         }
     }
 
