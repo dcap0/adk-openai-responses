@@ -30,7 +30,8 @@ public record OpenAIResponsesAPIRequest<T>(
         @JsonProperty("model") String model,
         @JsonProperty("input") T input,
         @JsonProperty("instructions") String instructions,
-        @JsonProperty("stream") boolean stream
+        @JsonProperty("stream") boolean stream,
+        @JsonProperty("tools") List<Tool> tools
 ) {
 
     private static final Logger logger = LoggerFactory.getLogger(OpenAIResponsesAPIRequest.class);
@@ -71,6 +72,7 @@ public record OpenAIResponsesAPIRequest<T>(
         private T input;
         private String instructions;
         private boolean stream;
+        private List<Tool> tools;
 
         private Builder(){}
 
@@ -140,6 +142,17 @@ public record OpenAIResponsesAPIRequest<T>(
         }
 
         /**
+         * Provides a list of tools for the agent.
+         *
+         * @param tools A list of tools for the agent to have access to.
+         * @return This builder instance
+         */
+        public Builder<T> tools(List<Tool> tools){
+            this.tools = tools;
+            return this;
+        }
+
+        /**
          * Validates the internal state of the builder before constructing the request.
          *
          * @throws OpenAIBuildException If required fields are missing, empty, or of an invalid type.
@@ -185,7 +198,7 @@ public record OpenAIResponsesAPIRequest<T>(
          */
         public OpenAIResponsesAPIRequest<T> build() {
             validateFields();
-            return new OpenAIResponsesAPIRequest<>(model,input,instructions,stream);
+            return new OpenAIResponsesAPIRequest<>(model,input,instructions,stream,tools);
         }
 
     }
