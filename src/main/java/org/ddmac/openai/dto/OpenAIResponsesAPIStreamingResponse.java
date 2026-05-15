@@ -1,5 +1,6 @@
 package org.ddmac.openai.dto;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -27,7 +28,16 @@ import org.slf4j.LoggerFactory;
 public record OpenAIResponsesAPIStreamingResponse(
         @JsonProperty("delta") String delta,
         @JsonProperty("text") String text,
-        @JsonProperty("response") ResponseData response
+        @JsonProperty("response") ResponseData response,
+
+        @JsonAlias({"name","tool_name","function_name"})
+        @JsonProperty("name") String name,
+
+        @JsonAlias({"call_id","tool_id","id","function_id"})
+        @JsonProperty("call_id") String callId,
+
+        @JsonProperty("item") NestedToolItem item,
+        @JsonProperty("function") NestedToolItem function
 ) {
 
     private static final Logger logger = LoggerFactory.getLogger(OpenAIResponsesAPIStreamingResponse.class);
@@ -48,6 +58,37 @@ public record OpenAIResponsesAPIStreamingResponse(
             @JsonProperty("usage") Usage usage,
             @JsonProperty("output_text") String outputText
     ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public record NestedToolItem(
+            @JsonAlias({"name","tool_name","function_name"})
+            @JsonProperty("name") String name,
+
+            @JsonAlias({"call_id","tool_id","id","function_id"})
+            @JsonProperty("call_id") String callId
+
+    ){}
+
+
+    /**
+     * Helper method to seamlessly extract the tool name regardless of how the server nested it.
+     */
+    public String extractToolName() {
+        if (name != null) return name;
+        if (item != null && item.name() != null) return item.name();
+        if (function != null && function.name() != null) return function.name();
+        return null;
+    }
+
+    /**
+     * Helper method to seamlessly extract the tool ID regardless of how the server nested it.
+     */
+    public String extractCallId() {
+        if (callId != null) return callId;
+        if (item != null && item.callId() != null) return item.callId();
+        if (function != null && function.callId() != null) return function.callId();
+        return null;
     }
 
     /**
