@@ -162,6 +162,12 @@ public class OpenAIResponsesLlm extends BaseLlm {
                             String line;
                             String currentEvent = "";
 
+                            //tool
+                            String toolCallId = null;
+                            String toolName = null;
+                            StringBuilder toolArgs = new StringBuilder();
+                            boolean toolCalledThisTurn = false;
+
                             while ((line = br.readLine()) != null) {
                                 if (line.isEmpty()) continue;
                                 if (!line.startsWith("event: ") && !line.startsWith("data: ")) {
@@ -183,23 +189,84 @@ public class OpenAIResponsesLlm extends BaseLlm {
                                                 return;
                                             }
                                             break;
+
                                         case "response.completed":
                                             captureUsage(jsonData);
-                                            emitter.onNext(
-                                                    LlmResponse
-                                                            .builder()
-                                                            .turnComplete(true)
-                                                            .partial(false)
-                                                            .build()
-                                            );
+
+                                            if(!toolCalledThisTurn) {
+                                                emitter.onNext(
+                                                        LlmResponse.builder()
+                                                                .turnComplete(true)
+                                                                .partial(false)
+                                                                .build()
+                                                );
+                                            }
                                             emitter.onComplete();
                                             return;
+
                                         case "response.output_text.done":
                                             //check stuff
                                             break;
+
+                                        case "response.function_call.name":
+                                        case "response.output_item.added":
+                                            OpenAIResponsesAPIStreamingResponse metaChunk = mapper.readValue(jsonData, OpenAIResponsesAPIStreamingResponse.class);
+                                            String extractedName = metaChunk.extractToolName();
+                                            String extractedId = metaChunk.extractCallId();
+
+                                            // FIX 1: Only assign if the extracted values themselves are actually present
+                                            if (extractedName != null && !extractedName.isBlank()) toolName = extractedName;
+                                            if (extractedId != null && !extractedId.isBlank()) toolCallId = extractedId;
+                                            break;
+
+                                        case "response.function_call.arguments.delta":
+                                        case "response.function_call_arguments.delta":
+                                            OpenAIResponsesAPIStreamingResponse argChunk = mapper.readValue(jsonData, OpenAIResponsesAPIStreamingResponse.class);
+                                            String backupName = argChunk.extractToolName();
+                                            String backupId = argChunk.extractCallId();
+
+                                            if (backupName != null && !backupName.isBlank() && toolName == null) toolName = backupName;
+                                            if (backupId != null && !backupId.isBlank() && toolCallId == null) toolCallId = backupId;
+
+                                            if (argChunk.delta() != null) toolArgs.append(argChunk.delta());
+                                            break;
+
+                                        case "response.function_call.done":
+                                        case "response.function_call_arguments.done":
+                                        case "response.output_item.done":
+                                            // FIX 2: Safeguard against empty or missing identifiers before emission
+                                            if (toolName != null || !toolArgs.isEmpty()) {
+                                                toolCalledThisTurn = true;
+
+                                                // Fallback value if toolName somehow escaped extraction
+                                                if (toolName == null || toolName.isBlank()) {
+                                                    toolName = "unknown_tool";
+                                                }
+                                                if (toolCallId == null || toolCallId.isBlank()) {
+                                                    toolCallId = "local_call_" + UUID.randomUUID();
+                                                }
+
+                                                try {
+                                                    emitter.onNext(
+                                                            parseToolStreamingResponse(toolCallId, toolName, toolArgs.toString())
+                                                    );
+                                                } catch (JsonProcessingException e) {
+                                                    emitter.onError(new RuntimeException("LLM provided invalid tool arguments: " + toolArgs, e));
+                                                } catch (Exception e){
+                                                    emitter.onError(new RuntimeException("Error executing tool stream parsing: " + e.getMessage(), e));
+                                                }
+
+                                                // Reset state
+                                                toolCallId = null;
+                                                toolName = null;
+                                                toolArgs.setLength(0);
+                                            }
+                                            break;
+
                                         case "error":
                                             emitter.onError(new RuntimeException("API response parsing failed: " + jsonData));
                                             return;
+
                                         default:
                                             break;
                                     }
@@ -262,67 +329,48 @@ public class OpenAIResponsesLlm extends BaseLlm {
                 .model(model())
                 .stream(stream);
 
-        if (stream) {
-            String instructions = String.join("\n", llmRequest.getSystemInstructions());
+        String instructions = String.join("\n", llmRequest.getSystemInstructions());
 
+        if (!instructions.isBlank()){
             builder = builder.instructions(instructions);
+        }
 
-            List<Input> inputs = llmRequest.contents().stream()
-                    .map(content -> {
-                        //get role and map model to assistant
-                        String role = content.role().orElse("user").toLowerCase();
-                        if (role.equals("model")) {
-                            role = "assistant";
-                        }
+        List<Input> inputs = llmRequest.contents().stream()
+                .map(content -> {
+                    String role = content.role().orElse("user").toLowerCase();
 
-                        List<Content> contentList = content.parts().orElse(new ArrayList<>())
-                                .stream().map(part -> new Content("input_text", part.text().orElse("")))
-                                .toList();
+                    if(role.equals("model")){
+                        role = "assistant";
+                    }
+                    else if (role.equals("tool") || role.equals("function")){
+                        role = "user";
+                    }
 
-
-                        return new Input(role, contentList);
-                    })
-                    .toList();
-
-            builder = builder.input(inputs);
-        } else {
-            List<Input> inputs = llmRequest.contents().stream()
-                    .map(content -> {
-                        String role = content.role().orElse("user").toLowerCase();
-
-                        if(role.equals("model")){
-                            role = "assistant";
-                        }
-                        else if (role.equals("tool") || role.equals("function")){
-                            role = "user";
-                        }
-
-                        List<Content> contentList = new ArrayList<>();
-                        if (content.parts().isPresent()){
-                            for (Part part: content.parts().get()){
-                                if(part.text().isPresent()) {
-                                    contentList.add(new Content("input_text", part.text().get()));
-                                }
-                                else if (part.functionResponse().isPresent()){
-                                    try{
-                                        Object responseData = part.functionResponse().get().response().orElseThrow();
-                                        String resultJson = mapper.writeValueAsString(responseData);
-                                        contentList.add(new Content("input_text","System Tool Output[" + part.functionResponse().get().name().orElseThrow() + "]: " + resultJson));
-                                    } catch (Exception e) {
-                                        contentList.add(new Content("input_text","Tool executed."));
-                                    }
-                                }
-                                else if (part.functionCall().isPresent()) {
-                                    contentList.add(new Content("input_text", "Action taken: Executed tool '" + part.functionCall().get().name().orElse("unknown") + "'"));
+                    List<Content> contentList = new ArrayList<>();
+                    if (content.parts().isPresent()){
+                        for (Part part: content.parts().get()){
+                            if(part.text().isPresent()) {
+                                contentList.add(new Content("input_text", part.text().get()));
+                            }
+                            else if (part.functionResponse().isPresent()){
+                                try{
+                                    Object responseData = part.functionResponse().get().response().orElseThrow();
+                                    String resultJson = mapper.writeValueAsString(responseData);
+                                    contentList.add(new Content("input_text","System Tool Output[" + part.functionResponse().get().name().orElseThrow() + "]: " + resultJson));
+                                } catch (Exception e) {
+                                    contentList.add(new Content("input_text","Tool executed."));
                                 }
                             }
+                            else if (part.functionCall().isPresent()) {
+                                contentList.add(new Content("input_text", "Action taken: Executed tool '" + part.functionCall().get().name().orElse("unknown") + "'"));
+                            }
                         }
-                        return new Input(role,contentList);
-                    })
-                    .filter(input -> !input.content().isEmpty())
-                    .toList();
-            builder = builder.input(inputs);
-        }
+                    }
+                    return new Input(role,contentList);
+                })
+                .filter(input -> !input.content().isEmpty())
+                .toList();
+        builder = builder.input(inputs);
 
         if (llmRequest.tools() != null && !llmRequest.tools().isEmpty()) {
             List<Tool> openAiTools = llmRequest.tools().values().stream()
@@ -370,6 +418,30 @@ public class OpenAIResponsesLlm extends BaseLlm {
         OpenAIResponsesAPIStreamingResponse res = mapper.readValue(json, OpenAIResponsesAPIStreamingResponse.class);
         String text = res.delta() != null ? res.delta() : (res.text() != null ? res.text() : "");
         return buildLlmResponse(text, true);
+    }
+
+    private LlmResponse parseToolStreamingResponse(String toolCallId, String toolName, String argStr) throws JsonProcessingException {
+        Map<String,Object> argMap = new HashMap<>();
+        if(!argStr.isBlank()){
+            argMap = mapper.readValue(argStr,new TypeReference<>(){});
+        }
+
+        Part toolPart = Part.builder()
+                .functionCall(
+                        FunctionCall.builder()
+                                .id(toolCallId != null ? toolCallId : "local_call_" + UUID.randomUUID())
+                                .name(toolName != null ? toolName : "unknown_tool")
+                                .args(argMap)
+                                .build()
+                ).build();
+
+        return LlmResponse.builder()
+                .content(com.google.genai.types.Content.builder()
+                        .role("model")
+                        .parts(List.of(toolPart))
+                        .build())
+                .turnComplete(false)
+                .build();
     }
 
     /**
